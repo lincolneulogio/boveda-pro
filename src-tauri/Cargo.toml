@@ -1,6 +1,6 @@
 [package]
 name = "boveda-pro"
-version = "1.0.0"
+version = "1.0.1"
 description = "Gestor de contraseñas local cifrado"
 authors = ["Bóveda Pro"]
 edition = "2021"

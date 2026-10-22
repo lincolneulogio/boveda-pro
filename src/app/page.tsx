@@ -11,6 +11,8 @@ import {
   type VaultEntry,
 } from "@/lib/crypto";
 
+const AUTO_LOCK_OPTIONS = [1, 3, 5, 10, 15, 30] as const;
+
 export default function Home() {
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [master, setMaster] = useState("");
@@ -25,6 +27,9 @@ export default function Home() {
   const [updateVersion, setUpdateVersion] = useState<string | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [installingUpdate, setInstallingUpdate] = useState(false);
+  const [autoLockMinutes, setAutoLockMinutes] = useState<
+    (typeof AUTO_LOCK_OPTIONS)[number]
+  >(5);
   const [error, setError] = useState("");
   const [dialog, setDialog] = useState(false);
   const [editing, setEditing] = useState<VaultEntry | null>(null);
@@ -43,6 +48,34 @@ export default function Home() {
     setUnlocked(false);
     setError("");
   }, []);
+
+  useEffect(() => {
+    try {
+      const storedMinutes = Number(
+        window.localStorage.getItem("boveda.autoLockMinutes"),
+      );
+      if (AUTO_LOCK_OPTIONS.some((minutes) => minutes === storedMinutes)) {
+        setAutoLockMinutes(
+          storedMinutes as (typeof AUTO_LOCK_OPTIONS)[number],
+        );
+      }
+    } catch {
+      // Keep the secure five-minute default if local settings are unavailable.
+    }
+  }, []);
+
+  function changeAutoLockMinutes(value: string) {
+    const minutes = Number(value);
+    if (!AUTO_LOCK_OPTIONS.some((option) => option === minutes)) return;
+    setAutoLockMinutes(minutes as (typeof AUTO_LOCK_OPTIONS)[number]);
+    try {
+      window.localStorage.setItem("boveda.autoLockMinutes", String(minutes));
+    } catch {
+      setNotice(
+        "Se aplicó el ajuste, pero no se pudo guardar para la próxima vez",
+      );
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -109,19 +142,36 @@ export default function Home() {
 
   useEffect(() => {
     if (!unlocked) return;
-    let timer = window.setTimeout(lock, 5 * 60 * 1000);
+    const timeoutMs = autoLockMinutes * 60 * 1000;
+    let timer = window.setTimeout(lock, timeoutMs);
     const reset = () => {
       window.clearTimeout(timer);
-      timer = window.setTimeout(lock, 5 * 60 * 1000);
+      timer = window.setTimeout(lock, timeoutMs);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (
+        (event.ctrlKey || event.metaKey) &&
+        event.shiftKey &&
+        event.code === "KeyL"
+      ) {
+        event.preventDefault();
+        lock();
+        return;
+      }
+      reset();
     };
     window.addEventListener("pointerdown", reset);
-    window.addEventListener("keydown", reset);
+    window.addEventListener("pointermove", reset);
+    window.addEventListener("touchstart", reset);
+    window.addEventListener("keydown", onKeyDown);
     return () => {
       window.clearTimeout(timer);
       window.removeEventListener("pointerdown", reset);
-      window.removeEventListener("keydown", reset);
+      window.removeEventListener("pointermove", reset);
+      window.removeEventListener("touchstart", reset);
+      window.removeEventListener("keydown", onKeyDown);
     };
-  }, [unlocked, lock]);
+  }, [unlocked, lock, autoLockMinutes]);
 
   async function unlock(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -372,6 +422,31 @@ export default function Home() {
                 onClick={() => edit()}
               >
                 ＋ <span>Nuevo acceso</span>
+              </button>
+            </div>
+            <div className="security-controls">
+              <label className="lock-time-control" htmlFor="auto-lock-minutes">
+                <span>Bloquear tras</span>
+                <select
+                  id="auto-lock-minutes"
+                  value={autoLockMinutes}
+                  onChange={(event) =>
+                    changeAutoLockMinutes(event.currentTarget.value)
+                  }
+                >
+                  {AUTO_LOCK_OPTIONS.map((minutes) => (
+                    <option key={minutes} value={minutes}>
+                      {minutes} {minutes === 1 ? "minuto" : "minutos"}
+                    </option>
+                  ))}
+                </select>
+                <span>de inactividad</span>
+              </label>
+              <div className="lock-shortcut">
+                Atajo <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>L</kbd>
+              </div>
+              <button type="button" className="quiet" onClick={lock}>
+                Bloquear ahora
               </button>
             </div>
             <div className="stat-row">

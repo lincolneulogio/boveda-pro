@@ -322,6 +322,43 @@ button {
   align-items: center;
   margin-bottom: 3px;
 }
+.security-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin: 0 0 20px;
+  padding: 12px 15px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #171c19;
+  color: #b8c2ba;
+  font-size: 12px;
+}
+.lock-time-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.lock-time-control select {
+  color: var(--text);
+  background: #202722;
+  border: 1px solid #354039;
+  border-radius: 7px;
+  padding: 7px 9px;
+}
+.lock-shortcut {
+  margin-left: auto;
+  color: var(--muted);
+}
+.lock-shortcut kbd {
+  color: #dce3dd;
+  background: #252d28;
+  border: 1px solid #3a443e;
+  border-radius: 4px;
+  padding: 3px 5px;
+  font: inherit;
+}
 .stat-row {
   display: grid;
   grid-template-columns: 1fr 1fr auto;
@@ -694,6 +731,12 @@ button {
   .page-title {
     margin: 30px 0 18px;
     align-items: flex-start;
+  }
+  .security-controls {
+    gap: 10px;
+  }
+  .lock-shortcut {
+    margin-left: 0;
   }
   .page-title h1 {
     font-size: 27px;

@@ -32,9 +32,11 @@ Para desarrollar la app en una ventana nativa, ejecuta `pnpm desktop:dev`. `scri
 
 El actualizador consulta `latest.json` en la última GitHub Release. El flujo `.github/workflows/release.yml` compila los instaladores NSIS y MSI, firma los artefactos y publica la Release cuando se sube un tag `v*`. La app consulta actualizaciones al iniciarse y permite buscarlas manualmente; si hay una versión nueva, ofrece instalarla desde la propia app.
 
-Antes de publicar el repositorio hay que reemplazar `OWNER/REPOSITORY` en `src-tauri/tauri.conf.json` con el propietario y nombre reales del repositorio, y sustituir `PUBLIC_KEY_TO_BE_CONFIGURED` por la clave pública de Tauri. La clave privada debe permanecer fuera del repositorio. En GitHub → Settings → Secrets and variables → Actions, guardar la clave privada como `TAURI_SIGNING_PRIVATE_KEY` y su contraseña (si se configuró una) como `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+La app consulta `https://github.com/lincolneulogio/boveda-pro/releases/latest/download/latest.json`. El feed de actualizaciones y sus instaladores tienen que poder descargarse sin iniciar sesión. Si el repositorio de código sigue privado, publica los instaladores en un repositorio de releases público y cambia el endpoint a ese repositorio.
 
-Para publicar una actualización, aumenta la versión en `package.json`, `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`, crea y sube el tag correspondiente, por ejemplo `v1.0.1`. GitHub Actions compilará y publicará los instaladores y el manifiesto que consulta la app. La firma de actualizaciones es obligatoria para que Tauri acepte los paquetes.
+La clave pública de Tauri ya está configurada en `src-tauri/tauri.conf.json`. La clave privada está fuera del repositorio en `work/secrets/boveda-pro-updater.key`; conserva una copia segura y no la subas al código. En GitHub → Settings → Secrets and variables → Actions, guardar el contenido de la clave privada como `TAURI_SIGNING_PRIVATE_KEY`. La clave actual no tiene contraseña; el secreto `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` puede quedar vacío.
+
+La versión `1.0.1` incorpora el actualizador. La versión `1.0.0` instalada previamente no tiene el actualizador integrado, por lo que hay que instalar manualmente una vez el instalador `1.0.1`; las siguientes versiones ya podrán ofrecerse desde la app. Para publicar cada actualización, aumenta la versión en `package.json`, `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`, y sube el tag correspondiente, por ejemplo `v1.0.2`. GitHub Actions compilará y publicará los instaladores y el manifiesto que consulta la app. La firma de actualizaciones es obligatoria para que Tauri acepte los paquetes.
 
 ## Datos y respaldos
 
