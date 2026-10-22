@@ -1,0 +1,19 @@
+* { box-sizing: border-box; }
+body { width: 340px; margin: 0; background: #101412; color: #eef1ee; font: 13px system-ui, sans-serif; }
+header { display: flex; gap: 11px; align-items: center; padding: 16px 18px; border-bottom: 1px solid #2b332e; }
+.brand { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: #b4e6a9; color: #162018; font-size: 19px; font-weight: 800; }
+header b, header small { display: block; } header small { margin-top: 2px; color: #89948d; font-size: 10px; }
+main { padding: 16px 18px 18px; }
+p { color: #aab4ad; line-height: 1.55; margin: 0 0 14px; }
+label { display: block; margin: 12px 0 6px; color: #bdc7bf; font-size: 11px; }
+input[type=password] { width: 100%; padding: 10px; border: 1px solid #39433c; border-radius: 7px; background: #171c19; color: #fff; outline: 0; }
+.sync-form { margin-top: 16px; padding-top: 13px; border-top: 1px solid #2b332e; }
+button, .file-button { width: 100%; display: block; padding: 10px 12px; border: 1px solid #39433c; border-radius: 7px; background: #202722; color: #e7ede8; text-align: center; cursor: pointer; font: inherit; }
+.primary, .file-button { margin-top: 12px; background: #b4e6a9; color: #17221a; border-color: #b4e6a9; font-weight: 700; }
+.quiet { margin-top: 8px; background: transparent; }
+.file-button input { display: none; }
+.credential { padding: 11px; margin: 8px 0; border: 1px solid #303a33; border-radius: 8px; background: #171c19; }
+.credential b, .credential small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.credential small { margin-top: 4px; color: #99a49c; }
+.credential button { margin-top: 9px; padding: 8px; }
+#message { min-height: 18px; padding-top: 8px; color: #ff938c; font-size: 11px; }

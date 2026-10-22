@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Permisos esenciales de la ventana principal de Bóveda Pro.",
   "windows": ["main"],
-  "permissions": ["core:default", "updater:default"]
+  "permissions": ["core:default", "updater:default", "dialog:allow-open"]
 }

@@ -9,6 +9,11 @@ Aplicación de escritorio instalable para Windows. Tauri empaqueta la interfaz N
 - Cifrado AES-256-GCM en la app con clave derivada mediante PBKDF2-SHA256 (600 000 iteraciones).
 - Guardado local en el directorio de datos de la aplicación mediante Rust.
 - Importación y exportación de respaldos cifrados.
+- Historial local de copias cifradas, restauración e importación CSV.
+- Categorías, favoritos, notas seguras, campos personalizados y archivos adjuntos cifrados.
+- Generador flexible, evaluación de fortaleza y avisos de contraseñas débiles, repetidas o antiguas.
+- Códigos TOTP, paquetes cifrados para compartir y comprobación manual de contraseñas expuestas mediante k-anonymity.
+- Extensión de navegador con autorrelleno y sincronización local de la bóveda cifrada.
 - Instaladores de Windows NSIS (`.exe`) y MSI (`.msi`).
 - Tauri v2 con permisos mínimos: solo comandos Rust para leer y escribir el sobre cifrado.
 - Biome para análisis estático y formato del frontend.
@@ -36,7 +41,7 @@ La app consulta `https://github.com/lincolneulogio/boveda-pro/releases/latest/do
 
 La clave pública de Tauri ya está configurada en `src-tauri/tauri.conf.json`. La clave privada está fuera del repositorio, en `../../work/secrets/boveda-pro-updater.key`; conserva una copia segura y no la subas al código. En GitHub → Settings → Secrets and variables → Actions, guarda el contenido de la clave privada como `TAURI_SIGNING_PRIVATE_KEY`. La clave actual no tiene contraseña; el secreto `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` puede quedar vacío.
 
-La versión `1.0.1` incorpora el actualizador. La versión `1.0.0` instalada previamente no tiene el actualizador integrado, por lo que hay que instalar manualmente una vez el instalador `1.0.1`; las siguientes versiones ya podrán ofrecerse desde la app. Para publicar cada actualización, aumenta la versión en `package.json`, `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`, y sube el tag correspondiente, por ejemplo `v1.0.2`. GitHub Actions compilará y publicará los instaladores y el manifiesto que consulta la app. La firma de actualizaciones es obligatoria para que Tauri acepte los paquetes.
+La versión `1.0.1` incorpora el actualizador. La versión `1.0.0` instalada previamente no tiene el actualizador integrado, por lo que hay que instalar manualmente una vez el instalador `1.0.1`; las siguientes versiones ya podrán ofrecerse desde la app. Para publicar cada actualización, aumenta la versión en `package.json`, `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`, y sube el tag correspondiente. GitHub Actions compilará y publicará los instaladores y el manifiesto que consulta la app. La firma de actualizaciones es obligatoria para que Tauri acepte los paquetes.
 
 ## Datos y respaldos
 

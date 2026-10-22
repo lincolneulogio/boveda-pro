@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "Bóveda Pro — Autorrelleno",
+  "version": "1.0.0",
+  "description": "Autorrelleno bajo demanda desde un respaldo cifrado de Bóveda Pro.",
+  "permissions": ["activeTab", "storage", "scripting"],
+  "host_permissions": ["http://127.0.0.1:47821/*"],
+  "action": {
+    "default_title": "Autorrelleno de Bóveda Pro",
+    "default_popup": "popup.html"
+  }
+}

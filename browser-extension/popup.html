@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bóveda Pro</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header><div class="brand">B</div><div><b>Bóveda Pro</b><small>Autorrelleno seguro</small></div></header>
+    <main>
+      <section id="setup" hidden>
+        <p>Importa el respaldo cifrado exportado desde Bóveda Pro. La extensión conserva solo el archivo cifrado.</p>
+        <label class="file-button">Importar respaldo cifrado<input id="backup" type="file" accept="application/json,.json" /></label>
+        <div class="sync-form"><label for="pair-token">O conecta con la app abierta</label><input id="pair-token" type="password" autocomplete="off" placeholder="Token de emparejamiento" /><button id="pair" class="primary">Conectar y sincronizar</button></div>
+      </section>
+      <section id="unlock" hidden>
+        <p id="site"></p>
+        <label for="master">Contraseña maestra</label>
+        <input id="master" type="password" autocomplete="current-password" placeholder="Contraseña maestra" />
+        <button id="open" class="primary">Desbloquear y buscar acceso</button>
+        <button id="sync" class="quiet">Sincronizar ahora</button>
+        <button id="replace" class="quiet">Conectar o importar otro respaldo</button>
+      </section>
+      <section id="matches" hidden>
+        <p id="match-heading"></p>
+        <div id="list"></div>
+        <button id="lock" class="quiet">Bloquear y cerrar</button>
+      </section>
+      <div id="message" role="status"></div>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

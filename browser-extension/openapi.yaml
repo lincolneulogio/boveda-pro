@@ -1,0 +1,45 @@
+openapi: 3.1.0
+info:
+  title: Bóveda Pro Local Sync API
+  version: 1.0.0
+  description: Read-only loopback endpoint that serves the already encrypted vault to a paired browser extension.
+servers:
+  - url: http://127.0.0.1:47821
+paths:
+  /v1/vault:
+    get:
+      summary: Read the current encrypted vault
+      security:
+        - pairingToken: []
+      responses:
+        '200':
+          description: Current encrypted vault, or null when the app has no vault yet.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [vault]
+                properties:
+                  vault:
+                    oneOf:
+                      - $ref: '#/components/schemas/EncryptedVault'
+                      - type: 'null'
+        '401': { description: Missing or invalid pairing token }
+        '403': { description: Request origin is not a browser extension }
+components:
+  securitySchemes:
+    pairingToken:
+      type: http
+      scheme: bearer
+  schemas:
+    EncryptedVault:
+      type: object
+      required: [version, kdf, iterations, salt, iv, ciphertext, updatedAt]
+      properties:
+        version: { type: integer, const: 1 }
+        kdf: { type: string, const: PBKDF2-SHA256 }
+        iterations: { type: integer, minimum: 600000 }
+        salt: { type: string }
+        iv: { type: string }
+        ciphertext: { type: string }
+        updatedAt: { type: string, format: date-time }
