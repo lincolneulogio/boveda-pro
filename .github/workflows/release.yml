@@ -33,6 +33,15 @@ jobs:
       - name: Instalar dependencias
         run: pnpm install --frozen-lockfile
 
+      - name: Verificar clave de firma del actualizador
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            throw "Falta el secreto TAURI_SIGNING_PRIVATE_KEY. Configúralo en Settings > Secrets and variables > Actions antes de publicar una Release. No guardes la clave privada en el repositorio."
+          }
+
       - name: Crear instaladores y GitHub Release
         uses: tauri-apps/tauri-action@v1
         env:

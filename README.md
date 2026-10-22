@@ -1,5 +1,9 @@
 # Bóveda Pro
 
+**Gestor de contraseñas de escritorio para Windows.** Bóveda Pro cifra la bóveda en el dispositivo y no necesita una cuenta ni un servidor para guardar tus credenciales.
+
+[Descargar la última versión](https://github.com/lincolneulogio/boveda-pro/releases/latest) · [Reportar un problema](https://github.com/lincolneulogio/boveda-pro/issues/new/choose) · [Ver cambios](https://github.com/lincolneulogio/boveda-pro/releases)
+
 Aplicación de escritorio instalable para Windows. Tauri empaqueta la interfaz Next.js + TypeScript dentro de una ventana nativa y utiliza Rust para guardar la bóveda cifrada en el espacio privado de la aplicación. No se abre en el navegador ni necesita servidor web, cuenta o conexión a Internet para abrir la bóveda; si hay Internet, consulta GitHub para detectar actualizaciones. Tauri usa el WebView2 del sistema para dibujar la interfaz.
 
 ## Funciones incluidas
@@ -24,6 +28,14 @@ Aplicación de escritorio instalable para Windows. Tauri empaqueta la interfaz N
 - Node.js 20.9 o posterior y pnpm.
 - Rust estable con objetivo MSVC, Microsoft C++ Build Tools con “Desktop development with C++” y WebView2 Runtime. Tauri detalla los [requisitos para Windows](https://v2.tauri.app/start/prerequisites/).
 
+## Descargar e instalar en Windows
+
+1. Abre [Releases](https://github.com/lincolneulogio/boveda-pro/releases/latest) y descarga el instalador **.exe** recomendado o el paquete **.msi**. Ambos incluyen el número de versión en su nombre.
+2. Abre el instalador y sigue las instrucciones de Windows.
+3. Inicia Bóveda Pro y crea una bóveda o desbloquea la que ya tienes.
+
+Las actualizaciones automáticas aparecen dentro de la aplicación cuando se publica una Release firmada. Si tienes instalada la versión 1.0.0, instala manualmente la 1.0.1 o una posterior una sola vez; la 1.0.0 no incluía el actualizador.
+
 ## Crear instalador de Windows
 
 1. Instala los requisitos de Windows indicados arriba.
@@ -41,7 +53,7 @@ La app consulta `https://github.com/lincolneulogio/boveda-pro/releases/latest/do
 
 La clave pública de Tauri ya está configurada en `src-tauri/tauri.conf.json`. La clave privada está fuera del repositorio, en `../../work/secrets/boveda-pro-updater.key`; conserva una copia segura y no la subas al código. En GitHub → Settings → Secrets and variables → Actions, guarda el contenido de la clave privada como `TAURI_SIGNING_PRIVATE_KEY`. La clave actual no tiene contraseña; el secreto `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` puede quedar vacío.
 
-La versión `1.0.1` incorpora el actualizador. La versión `1.0.0` instalada previamente no tiene el actualizador integrado, por lo que hay que instalar manualmente una vez el instalador `1.0.1`; las siguientes versiones ya podrán ofrecerse desde la app. Para publicar cada actualización, aumenta la versión en `package.json`, `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`, y sube el tag correspondiente. GitHub Actions compilará y publicará los instaladores y el manifiesto que consulta la app. La firma de actualizaciones es obligatoria para que Tauri acepte los paquetes.
+La versión `1.0.1` incorpora el actualizador. La versión `1.0.0` instalada previamente no tiene el actualizador integrado, por lo que hay que instalar manualmente una vez una versión posterior; las siguientes versiones ya podrán ofrecerse desde la app. Para publicar cada actualización, aumenta la versión en `package.json`, `src-tauri/tauri.conf.json` y `src-tauri/Cargo.toml`, y sube el tag correspondiente. GitHub Actions compilará y publicará los instaladores y el manifiesto que consulta la app. La firma de actualizaciones es obligatoria para que Tauri acepte los paquetes.
 
 ## Datos y respaldos
 

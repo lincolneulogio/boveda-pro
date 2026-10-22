@@ -1,0 +1,38 @@
+name: Reportar un error
+description: Informa de un problema reproducible en Bóveda Pro.
+title: "[Error]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        No incluyas contraseñas, claves TOTP, archivos de respaldo ni otros datos de tu bóveda. Describe el problema con información ficticia.
+  - type: input
+    id: version
+    attributes:
+      label: Versión de Bóveda Pro
+      placeholder: "1.0.2"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Pasos para reproducir
+      description: Explica qué hiciste antes de que apareciera el problema.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Resultado esperado
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Resultado obtenido
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Windows y detalles adicionales

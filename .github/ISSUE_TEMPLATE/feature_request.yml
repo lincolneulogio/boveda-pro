@@ -1,0 +1,20 @@
+name: Proponer una mejora
+description: Sugiere una función o una mejora para Bóveda Pro.
+title: "[Mejora]: "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: ¿Qué problema resolvería?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: ¿Qué te gustaría que hiciera la app?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
