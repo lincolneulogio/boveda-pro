@@ -1,0 +1,14 @@
+node_modules/
+.next/
+out/
+dist/
+target/
+src-tauri/gen/schemas/
+.env
+.env.*
+!.env.example
+*.key
+*.db
+*.db-shm
+*.db-wal
+coverage/
