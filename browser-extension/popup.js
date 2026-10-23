@@ -42,7 +42,17 @@ async function syncVault(token) {
 }
 
 async function decryptVault(vault, masterPassword) {
-  if (vault.version !== 1 || vault.kdf !== "PBKDF2-SHA256") throw new Error("El archivo no es un respaldo compatible de Bóveda Pro.");
+  if (![1, 2].includes(vault.version) || vault.kdf !== "PBKDF2-SHA256") throw new Error("El archivo no es un respaldo compatible de Bóveda Pro.");
+  if (vault.version === 2) {
+    const masterContext = encoder.encode("boveda:v2:master-key");
+    const dataContext = encoder.encode("boveda:v2:vault-data");
+    const material = await crypto.subtle.importKey("raw", encoder.encode(masterPassword), "PBKDF2", false, ["deriveKey"]);
+    const wrappingKey = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: fromBase64(vault.masterSalt), iterations: vault.iterations, hash: "SHA-256" }, material, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    const rawDataKey = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromBase64(vault.masterIv), additionalData: masterContext }, wrappingKey, fromBase64(vault.wrappedKey));
+    const dataKey = await crypto.subtle.importKey("raw", rawDataKey, { name: "AES-GCM" }, false, ["decrypt"]);
+    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromBase64(vault.dataIv), additionalData: dataContext }, dataKey, fromBase64(vault.ciphertext));
+    return JSON.parse(new TextDecoder().decode(plain));
+  }
   const material = await crypto.subtle.importKey("raw", encoder.encode(masterPassword), "PBKDF2", false, ["deriveKey"]);
   const key = await crypto.subtle.deriveKey({ name: "PBKDF2", salt: fromBase64(vault.salt), iterations: vault.iterations, hash: "SHA-256" }, material, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
   const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromBase64(vault.iv) }, key, fromBase64(vault.ciphertext));
@@ -104,7 +114,7 @@ async function init() {
       try {
         const file = event.target.files[0]; if (!file) return;
         const parsed = JSON.parse(await file.text());
-        if (parsed.version !== 1 || parsed.kdf !== "PBKDF2-SHA256") throw new Error("Selecciona un respaldo cifrado de Bóveda Pro.");
+        if (![1, 2].includes(parsed.version) || parsed.kdf !== "PBKDF2-SHA256") throw new Error("Selecciona un respaldo cifrado de Bóveda Pro.");
         await chrome.storage.local.set({ encryptedVault: parsed });
         show("unlock");
         $("message").style.color = "#b4e6a9";

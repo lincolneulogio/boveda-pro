@@ -2,6 +2,8 @@
 
 Extensión local compatible con Chrome, Edge y otros navegadores basados en Chromium (Manifest V3). El archivo de la bóveda permanece cifrado en el almacenamiento de la extensión; la contraseña maestra y los registros descifrados solo se usan en la ventana emergente abierta.
 
+Acepta respaldos cifrados de Bóveda Pro en los formatos 1 y 2. Para desbloquear cualquiera de ellos se usa la contraseña maestra actual; la clave de recuperación solo se necesita para restablecer esa contraseña en la aplicación de escritorio.
+
 ## Instalar
 
 1. Abre `chrome://extensions` (o `edge://extensions`), activa **Modo de desarrollador** y elige **Cargar descomprimida** para seleccionar esta carpeta `browser-extension`.
