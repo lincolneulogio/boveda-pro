@@ -14,6 +14,10 @@ struct SyncInfo { url: String, token: String, available: bool }
 #[derive(serde::Serialize)]
 struct BackupInfo { name: String, updated_at: String }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveVaultResult { backup_warning: Option<String> }
+
 fn make_sync_token() -> Result<String, String> {
     let mut bytes = [0u8; 32];
     getrandom::fill(&mut bytes).map_err(|error| error.to_string())?;
@@ -37,13 +41,17 @@ fn load_vault(app: AppHandle) -> Result<Option<String>, String> {
 }
 
 #[tauri::command]
-fn save_vault(app: AppHandle, vault_json: String) -> Result<(), String> {
+fn save_vault(app: AppHandle, vault_json: String) -> Result<SaveVaultResult, String> {
     let vault: Value = serde_json::from_str(&vault_json).map_err(|_| "El contenido de la bóveda no es JSON válido".to_owned())?;
-    let valid = vault.get("version").and_then(Value::as_u64) == Some(1)
-        && vault.get("kdf").and_then(Value::as_str) == Some("PBKDF2-SHA256")
+    let common = vault.get("kdf").and_then(Value::as_str) == Some("PBKDF2-SHA256")
         && vault.get("iterations").and_then(Value::as_u64).unwrap_or(0) >= 600_000
-        && vault.get("updatedAt").and_then(Value::as_str).is_some()
-        && ["salt", "iv", "ciphertext"].iter().all(|field| vault.get(field).and_then(Value::as_str).is_some());
+        && vault.get("updatedAt").and_then(Value::as_str).is_some();
+    let valid = common && match vault.get("version").and_then(Value::as_u64) {
+        Some(1) => ["salt", "iv", "ciphertext"].iter().all(|field| vault.get(field).and_then(Value::as_str).is_some()),
+        Some(2) => ["masterSalt", "masterIv", "wrappedKey", "recoverySalt", "recoveryIv", "recoveryWrappedKey", "dataIv", "ciphertext"]
+            .iter().all(|field| vault.get(field).and_then(Value::as_str).is_some()),
+        _ => false,
+    };
     if !valid {
         return Err("El formato de la bóveda cifrada no es compatible".to_owned());
     }
@@ -54,16 +62,65 @@ fn save_vault(app: AppHandle, vault_json: String) -> Result<(), String> {
     temporary.write_all(vault_json.as_bytes()).map_err(|error| error.to_string())?;
     temporary.as_file().sync_all().map_err(|error| error.to_string())?;
     temporary.persist(path).map_err(|error| error.error.to_string())?;
-    let _ = save_backup_snapshot(&app, &vault_json);
+    Ok(SaveVaultResult { backup_warning: save_backup_snapshot(&app, &vault_json).err() })
+}
+
+#[tauri::command]
+fn save_recovery_key(path: String, recovery_key: String) -> Result<(), String> {
+    let normalized: String = recovery_key.chars().filter(|character| *character != '-').collect();
+    if normalized.len() != 64 || !normalized.chars().all(|character| character.is_ascii_hexdigit()) {
+        return Err("La clave de recuperación no tiene un formato válido".to_owned());
+    }
+    let path = PathBuf::from(path);
+    if !path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("txt")) {
+        return Err("Guarda la clave en un archivo .txt separado".to_owned());
+    }
+    let contents = format!(
+        "Bóveda Pro — Clave de recuperación\n\n{recovery_key}\n\nGuárdala en un lugar seguro y separada de los respaldos cifrados.\n"
+    );
+    fs::write(path, contents).map_err(|error| format!("No se pudo guardar el archivo: {error}"))
+}
+
+#[tauri::command]
+fn export_encrypted_backup(path: String, vault_json: String) -> Result<(), String> {
+    let vault: Value = serde_json::from_str(&vault_json).map_err(|_| "La bóveda no contiene JSON válido".to_owned())?;
+    let common = vault.get("kdf").and_then(Value::as_str) == Some("PBKDF2-SHA256")
+        && vault.get("iterations").and_then(Value::as_u64).unwrap_or(0) >= 600_000
+        && vault.get("updatedAt").and_then(Value::as_str).is_some();
+    let valid = common && match vault.get("version").and_then(Value::as_u64) {
+        Some(1) => ["salt", "iv", "ciphertext"].iter().all(|field| vault.get(field).and_then(Value::as_str).is_some()),
+        Some(2) => ["masterSalt", "masterIv", "wrappedKey", "recoverySalt", "recoveryIv", "recoveryWrappedKey", "dataIv", "ciphertext"]
+            .iter().all(|field| vault.get(field).and_then(Value::as_str).is_some()),
+        _ => false,
+    };
+    if !valid { return Err("El respaldo cifrado no tiene un formato compatible".to_owned()); }
+    let path = PathBuf::from(path);
+    if !path.extension().is_some_and(|extension| extension.eq_ignore_ascii_case("json")) {
+        return Err("Guarda el respaldo con extensión .json".to_owned());
+    }
+    let directory = path.parent().ok_or_else(|| "No se encontró la carpeta de destino".to_owned())?;
+    let mut temporary = tempfile::NamedTempFile::new_in(directory).map_err(|error| error.to_string())?;
+    temporary.write_all(vault_json.as_bytes()).map_err(|error| error.to_string())?;
+    temporary.as_file().sync_all().map_err(|error| error.to_string())?;
+    temporary.persist(path).map_err(|error| error.error.to_string())?;
     Ok(())
 }
 
 fn backups_dir(app: &AppHandle) -> Result<PathBuf, String> {
     let data_dir = app.path().app_data_dir().map_err(|error| error.to_string())?;
     let setting = data_dir.join("backup-directory.txt");
-    let directory = match fs::read_to_string(setting) {
-        Ok(path) => PathBuf::from(path.trim()).canonicalize().map(|path| path.join("Boveda Pro Backups")).unwrap_or_else(|_| data_dir.join("backups")),
-        Err(_) => data_dir.join("backups"),
+    let configured_path = match fs::read_to_string(setting) {
+        Ok(path) => Some(path),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.to_string()),
+    };
+    let directory = match configured_path {
+        Some(path) => {
+            let selected = PathBuf::from(path.trim()).canonicalize().map_err(|error| format!("No se puede acceder a la carpeta de copias elegida: {error}"))?;
+            if !selected.is_dir() { return Err("La carpeta elegida para las copias ya no existe".to_owned()); }
+            selected.join("Boveda Pro Backups")
+        }
+        None => data_dir.join("backups"),
     };
     fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
     Ok(directory)
@@ -214,7 +271,7 @@ pub fn run() {
             app.manage(SyncState { token, available });
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![load_vault, save_vault, sync_info, list_backups, read_backup, get_backup_directory, set_backup_directory])
+        .invoke_handler(tauri::generate_handler![load_vault, save_vault, save_recovery_key, export_encrypted_backup, sync_info, list_backups, read_backup, get_backup_directory, set_backup_directory])
         .run(tauri::generate_context!())
         .expect("No se pudo iniciar Bóveda Pro");
 }

@@ -2,13 +2,17 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { check } from "@tauri-apps/plugin-updater";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   decryptVault,
   type EncryptedVault,
   encryptVault,
+  generateRecoveryKey,
+  recoverVault,
+  changeMasterPassword,
+  resetMasterWithRecovery,
   generatePassword,
   totpCode,
   type VaultCategory,
@@ -16,6 +20,7 @@ import {
 } from "@/lib/crypto";
 
 const AUTO_LOCK_OPTIONS = [1, 3, 5, 10, 15, 30] as const;
+const IS_DEVELOPMENT = process.env.NODE_ENV === "development";
 const CATEGORIES: { value: VaultCategory; label: string }[] = [
   { value: "sitio", label: "Sitio web" }, { value: "tarjeta", label: "Tarjeta" },
   { value: "nota", label: "Nota segura" }, { value: "wifi", label: "Red Wi-Fi" },
@@ -36,9 +41,22 @@ export default function Home() {
   const [entries, setEntries] = useState<VaultEntry[]>([]);
   const [master, setMaster] = useState("");
   const [confirmMaster, setConfirmMaster] = useState("");
+  const [recoveryToShow, setRecoveryToShow] = useState<string | null>(null);
+  const [recoveryAcknowledged, setRecoveryAcknowledged] = useState(false);
+  const [savingRecoveryKey, setSavingRecoveryKey] = useState(false);
+  const [credentialDialog, setCredentialDialog] = useState<"change" | "recover" | null>(null);
+  const [currentMasterInput, setCurrentMasterInput] = useState("");
+  const [recoveryInput, setRecoveryInput] = useState("");
+  const [recoveryBackupFile, setRecoveryBackupFile] = useState<File | null>(null);
+  const [recoveryBackupName, setRecoveryBackupName] = useState("");
+  const [recoveryLocalBackups, setRecoveryLocalBackups] = useState<LocalBackup[]>([]);
+  const [newMasterInput, setNewMasterInput] = useState("");
+  const [confirmNewMasterInput, setConfirmNewMasterInput] = useState("");
+  const [securityBusy, setSecurityBusy] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
   const [ready, setReady] = useState(false);
   const [startupError, setStartupError] = useState("");
+  const [vaultCorrupted, setVaultCorrupted] = useState(false);
   const [isNew, setIsNew] = useState(false);
   const [encrypted, setEncrypted] = useState<EncryptedVault | null>(null);
   const [query, setQuery] = useState("");
@@ -55,6 +73,7 @@ export default function Home() {
   const [categoryFilter, setCategoryFilter] = useState("todas");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [backupDue, setBackupDue] = useState(false);
+  const [backupWarning, setBackupWarning] = useState("");
   const [generatorLength, setGeneratorLength] = useState(24);
   const [generatorNumbers, setGeneratorNumbers] = useState(true);
   const [generatorSymbols, setGeneratorSymbols] = useState(true);
@@ -68,6 +87,7 @@ export default function Home() {
   const [lastBackup, setLastBackup] = useState(0);
   const [syncDetails, setSyncDetails] = useState<{ url: string; token: string; available: boolean } | null>(null);
   const [localBackups, setLocalBackups] = useState<LocalBackup[]>([]);
+  const [localRestoreChoice, setLocalRestoreChoice] = useState("");
   const [backupDirectory, setBackupDirectory] = useState("");
   const [totpCodes, setTotpCodes] = useState<Record<string, string>>({});
   const [attachmentFiles, setAttachmentFiles] = useState<{ name: string; type: string; data: string }[]>([]);
@@ -95,6 +115,16 @@ export default function Home() {
     setMaster("");
     setEntries([]);
     setUnlocked(false);
+    setRecoveryToShow(null);
+    setRecoveryAcknowledged(false);
+    setCredentialDialog(null);
+    setCurrentMasterInput("");
+    setRecoveryInput("");
+    setRecoveryBackupFile(null);
+    setRecoveryBackupName("");
+    setNewMasterInput("");
+    setConfirmNewMasterInput("");
+    setSecurityBusy(false);
     setError("");
   }, []);
 
@@ -130,13 +160,18 @@ export default function Home() {
   }, [ready]);
 
   useEffect(() => {
-    if (!unlocked) return;
+    if (!ready) return;
     invoke<LocalBackup[]>("list_backups").then(setLocalBackups).catch(() => setLocalBackups([]));
-  }, [unlocked, entries]);
+  }, [ready, unlocked, entries]);
 
   useEffect(() => {
     if (!unlocked) return;
-    invoke<string>("get_backup_directory").then(setBackupDirectory).catch(() => setBackupDirectory(""));
+    invoke<string>("get_backup_directory")
+      .then(setBackupDirectory)
+      .catch(() => {
+        setBackupDirectory("");
+        setBackupWarning("No se puede acceder a la carpeta de copias configurada. Revisa que OneDrive, Google Drive o Dropbox esté disponible.");
+      });
   }, [unlocked]);
 
   function changeAutoLockMinutes(value: string) {
@@ -169,12 +204,24 @@ export default function Home() {
   async function chooseBackupDirectory() {
     const path = await openDialog({ directory: true, multiple: false, title: "Elige dónde guardar las copias cifradas" });
     if (typeof path !== "string") return;
-    try { setBackupDirectory(await invoke<string>("set_backup_directory", { path })); setNotice("Carpeta de copias actualizada"); }
+    try {
+      setBackupDirectory(await invoke<string>("set_backup_directory", { path }));
+      if (encrypted) {
+        const warning = await saveEncryptedVault(encrypted);
+        setNotice(warning ? "Carpeta seleccionada, pero no se pudo crear la copia automática" : "Carpeta actualizada y copia cifrada creada");
+      } else setNotice("Carpeta de copias actualizada");
+    }
     catch { setError("No se pudo usar esa carpeta para las copias."); }
   }
 
   async function resetBackupDirectory() {
-    try { setBackupDirectory(await invoke<string>("set_backup_directory", { path: null })); setNotice("Las copias se guardarán en la carpeta segura de la app"); }
+    try {
+      setBackupDirectory(await invoke<string>("set_backup_directory", { path: null }));
+      if (encrypted) {
+        const warning = await saveEncryptedVault(encrypted);
+        setNotice(warning ? "Carpeta local seleccionada, pero no se pudo crear la copia automática" : "Carpeta local actualizada y copia cifrada creada");
+      } else setNotice("Las copias se guardarán en la carpeta segura de la app");
+    }
     catch { setError("No se pudo cambiar la carpeta de copias."); }
   }
 
@@ -183,8 +230,20 @@ export default function Home() {
     invoke<string | null>("load_vault")
       .then((saved) => {
         if (!active) return;
-        setEncrypted(saved ? (JSON.parse(saved) as EncryptedVault) : null);
-        setIsNew(!saved);
+        if (!saved) {
+          setEncrypted(null);
+          setIsNew(true);
+          return;
+        }
+        try {
+          setEncrypted(JSON.parse(saved) as EncryptedVault);
+          setIsNew(false);
+        } catch {
+          setEncrypted(null);
+          setIsNew(true);
+          setVaultCorrupted(true);
+          setStartupError("El archivo local de la bóveda está dañado. Puedes restaurar un respaldo cifrado.");
+        }
       })
       .catch(() => {
         if (active)
@@ -219,7 +278,7 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!ready || IS_DEVELOPMENT) return;
     const timer = window.setTimeout(() => checkForUpdates(false), 2500);
     return () => window.clearTimeout(timer);
   }, [ready, checkForUpdates]);
@@ -310,9 +369,15 @@ export default function Home() {
     try {
       const saved = encrypted;
       if (!saved) {
-        setIsNew(true);
+        const recoveryKey = generateRecoveryKey();
+        const newVault = await encryptVault([], master, undefined, recoveryKey);
+        await saveEncryptedVault(newVault);
+        setEncrypted(newVault);
+        setIsNew(false);
         setEntries([]);
         setUnlocked(true);
+        setRecoveryToShow(recoveryKey);
+        setRecoveryAcknowledged(false);
         return;
       }
       setEntries(await decryptVault(saved, master));
@@ -321,7 +386,9 @@ export default function Home() {
       setUnlocked(true);
     } catch {
       setError(
-        "No se pudo abrir. Verifica la contraseña maestra e inténtalo otra vez.",
+        isNew
+          ? "No se pudo crear la bóveda en este equipo. Inténtalo otra vez."
+          : "No se pudo abrir. Verifica la contraseña maestra e inténtalo otra vez.",
       );
     }
   }
@@ -329,7 +396,7 @@ export default function Home() {
   async function persist(next: VaultEntry[]) {
     const box = await encryptVault(next, master, encrypted || undefined);
     try {
-      await invoke("save_vault", { vaultJson: JSON.stringify(box) });
+      await saveEncryptedVault(box);
     } catch {
       setError(
         "No se pudo guardar la bóveda en el equipo. Inténtalo otra vez.",
@@ -342,6 +409,152 @@ export default function Home() {
     setNotice("Guardado cifrado en este equipo");
     window.setTimeout(() => setNotice(""), 3500);
     return true;
+  }
+
+  async function saveEncryptedVault(vault: EncryptedVault) {
+    const result = await invoke<{ backupWarning: string | null }>("save_vault", { vaultJson: JSON.stringify(vault) });
+    setBackupWarning(result.backupWarning || "");
+    return result.backupWarning;
+  }
+
+  async function saveSecurityVault(vault: EncryptedVault, nextMaster?: string) {
+    await saveEncryptedVault(vault);
+    setEncrypted(vault);
+    setStartupError("");
+    setVaultCorrupted(false);
+    if (nextMaster !== undefined) setMaster(nextMaster);
+    setCredentialDialog(null);
+    setCurrentMasterInput("");
+    setRecoveryInput("");
+    setRecoveryBackupFile(null);
+    setRecoveryBackupName("");
+    setNewMasterInput("");
+    setConfirmNewMasterInput("");
+  }
+
+  function openRecoveryDialog(backupName = "") {
+    setCredentialDialog("recover");
+    setRecoveryBackupFile(null);
+    setRecoveryBackupName(backupName);
+    setError("");
+    void invoke<LocalBackup[]>("list_backups").then(setRecoveryLocalBackups).catch(() => setRecoveryLocalBackups([]));
+  }
+
+  function closeCredentialDialog() {
+    setCredentialDialog(null);
+    setError("");
+    setCurrentMasterInput("");
+    setRecoveryInput("");
+    setRecoveryBackupFile(null);
+    setRecoveryBackupName("");
+    setNewMasterInput("");
+    setConfirmNewMasterInput("");
+  }
+
+  async function submitCredentialChange(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    if (!encrypted && !recoveryBackupFile && !recoveryBackupName) return;
+    if (newMasterInput.length < 12) {
+      setError("La nueva contraseña maestra debe tener al menos 12 caracteres.");
+      return;
+    }
+    if (newMasterInput !== confirmNewMasterInput) {
+      setError("Las contraseñas maestras no coinciden.");
+      return;
+    }
+    setSecurityBusy(true);
+    try {
+      if (credentialDialog === "change") {
+        if (!encrypted) throw new Error("No hay una bóveda cargada.");
+        const currentVault = encrypted;
+        const existingEntries = await decryptVault(currentVault, currentMasterInput);
+        const result = await changeMasterPassword(currentVault, currentMasterInput, newMasterInput, existingEntries);
+        await saveSecurityVault(result.vault, newMasterInput);
+        setEntries(existingEntries);
+        if (result.recoveryKey) {
+          setRecoveryToShow(result.recoveryKey);
+          setRecoveryAcknowledged(false);
+        } else {
+          setNotice("Contraseña maestra actualizada");
+        }
+      } else if (credentialDialog === "recover") {
+        let sourceVault = encrypted;
+        if (recoveryBackupFile || recoveryBackupName) {
+          const backupText = recoveryBackupFile
+            ? await recoveryBackupFile.text()
+            : await invoke<string>("read_backup", { name: recoveryBackupName });
+          const parsed = JSON.parse(backupText) as EncryptedVault;
+          if (parsed.version !== 2 || parsed.kdf !== "PBKDF2-SHA256") throw new Error("El respaldo no tiene un formato compatible con recuperación.");
+          if (encrypted && !window.confirm("Este respaldo reemplazará la bóveda local. Se guardará una copia local antes de reemplazarla. ¿Continuar?")) return;
+          sourceVault = parsed;
+        }
+        if (!sourceVault || sourceVault.version !== 2) throw new Error("No hay una bóveda con recuperación. Selecciona un respaldo v2 que incluya su clave de recuperación.");
+        const restoredEntries = await recoverVault(sourceVault, recoveryInput);
+        const replacement = await resetMasterWithRecovery(sourceVault, recoveryInput, newMasterInput, restoredEntries);
+        await saveSecurityVault(replacement, newMasterInput);
+        setEntries(restoredEntries);
+        setIsNew(false);
+        setUnlocked(true);
+        setNotice("Contraseña restablecida con la clave de recuperación");
+      }
+    } catch {
+      setError(credentialDialog === "recover"
+        ? "No se pudo recuperar. Revisa la clave y que el respaldo sea una copia v2 válida de esta bóveda. No se modificó la bóveda."
+        : "No se pudo validar la contraseña actual o guardar el cambio. No se modificó la bóveda.");
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+
+  async function rotateRecoveryKey() {
+    if (!encrypted) return;
+    setError("");
+    setSecurityBusy(true);
+    try {
+      const recoveryKey = generateRecoveryKey();
+      const updatedVault = await encryptVault(entries, master, encrypted, recoveryKey);
+      await saveSecurityVault(updatedVault);
+      setRecoveryToShow(recoveryKey);
+      setRecoveryAcknowledged(false);
+    } catch {
+      setNotice("No se pudo crear una nueva clave de recuperación");
+    } finally {
+      setSecurityBusy(false);
+    }
+  }
+
+  async function copyRecoveryKey() {
+    if (!recoveryToShow) return;
+    try {
+      const value = recoveryToShow;
+      await navigator.clipboard.writeText(value);
+      setNotice("Clave copiada. Pégala y guárdala en un lugar seguro.");
+      window.setTimeout(async () => {
+        try { if (await navigator.clipboard.readText() === value) await navigator.clipboard.writeText(""); } catch { /* Clipboard access may be denied by the operating system. */ }
+      }, 30_000);
+    } catch {
+      setError("No se pudo copiar la clave. Selecciónala y guárdala manualmente.");
+    }
+  }
+
+  async function saveRecoveryKeyFile() {
+    if (!recoveryToShow) return;
+    setSavingRecoveryKey(true);
+    try {
+      const path = await saveDialog({
+        defaultPath: "Boveda Pro - clave de recuperacion.txt",
+        filters: [{ name: "Archivo de texto", extensions: ["txt"] }],
+      });
+      if (!path) return;
+      await invoke("save_recovery_key", { path, recoveryKey: recoveryToShow });
+      setError("");
+      setNotice("Archivo guardado. Mantén esta clave separada de los respaldos cifrados.");
+    } catch {
+      setError("No se pudo guardar el archivo. Inténtalo de nuevo o copia la clave manualmente.");
+    } finally {
+      setSavingRecoveryKey(false);
+    }
   }
 
   function edit(item?: VaultEntry) {
@@ -388,53 +601,80 @@ export default function Home() {
     }, 30_000);
     window.setTimeout(() => setNotice(""), 1800);
   }
-  function exportBackup() {
+  async function exportBackup() {
     if (!encrypted) return;
-    const blob = new Blob([JSON.stringify(encrypted, null, 2)], {
-      type: "application/json",
-    });
-    const link = document.createElement("a");
-    const downloadUrl = URL.createObjectURL(blob);
-    link.href = downloadUrl;
-    link.download = "boveda-pro-respaldo-cifrado.json";
-    link.click();
-    window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
-    const timestamp = Date.now();
-    try { window.localStorage.setItem("boveda.lastBackup", String(timestamp)); window.localStorage.removeItem("boveda.backupDismissedUntil"); } catch { /* Reminder is best effort. */ }
-    setLastBackup(timestamp);
-    setBackupDue(false);
+    try {
+      const path = await saveDialog({
+        defaultPath: "Boveda Pro - respaldo cifrado.json",
+        filters: [{ name: "Respaldo cifrado", extensions: ["json"] }],
+      });
+      if (!path) return;
+      await invoke("export_encrypted_backup", { path, vaultJson: JSON.stringify(encrypted, null, 2) });
+      const timestamp = Date.now();
+      try { window.localStorage.setItem("boveda.lastBackup", String(timestamp)); window.localStorage.removeItem("boveda.backupDismissedUntil"); } catch { /* Reminder is best effort. */ }
+      setLastBackup(timestamp);
+      setBackupDue(false);
+      setNotice("Respaldo cifrado exportado a la ubicación elegida");
+    } catch {
+      setError("No se pudo guardar el respaldo cifrado en esa ubicación.");
+    }
   }
   async function importBackup(file?: File) {
     if (!file) return;
+    if (master.length < 12) {
+      setError("Escribe la contraseña maestra que protege ese respaldo para poder restaurarlo.");
+      return;
+    }
     try {
       const box = JSON.parse(await file.text()) as EncryptedVault;
       const restored = await decryptVault(box, master);
       if (encrypted && !window.confirm("Este archivo reemplazará la bóveda actual. Se guardará una copia local antes de reemplazarla. ¿Continuar?")) return;
-      if (encrypted) await invoke("save_vault", { vaultJson: JSON.stringify(encrypted) });
-      await invoke("save_vault", { vaultJson: JSON.stringify(box) });
-      setEncrypted(box);
+      const replacement = encrypted?.version === 2
+        ? await encryptVault(restored, master, encrypted)
+        : box;
+      if (encrypted) await saveEncryptedVault(encrypted);
+      await saveEncryptedVault(replacement);
+      setEncrypted(replacement);
+      setStartupError("");
+      setVaultCorrupted(false);
       setIsNew(false);
       setEntries(restored);
+      setUnlocked(true);
+      setConfirmMaster("");
       setNotice("Respaldo importado");
     } catch {
-      setError("Respaldo inválido o no corresponde a esta contraseña maestra.");
+      openRecoveryDialog();
+      setRecoveryBackupFile(file);
+      setError("Este respaldo no se abrió con la contraseña actual. Si conservas su clave de recuperación, puedes restablecerla desde aquí.");
     }
   }
 
   async function restoreLocalBackup(name: string) {
     const selected = localBackups.find((backup) => backup.name === name);
+    if (master.length < 12) {
+      setError("Escribe la contraseña maestra que protege esa copia para restaurarla.");
+      return;
+    }
     if (!selected || !window.confirm(`Restaurar la copia del ${new Date(selected.updated_at).toLocaleString("es-PE")}? Se guardará una copia de la bóveda actual antes de reemplazarla.`)) return;
     try {
       const json = await invoke<string>("read_backup", { name });
       const box = JSON.parse(json) as EncryptedVault;
       const restored = await decryptVault(box, master);
-      if (encrypted) await invoke("save_vault", { vaultJson: JSON.stringify(encrypted) });
-      await invoke("save_vault", { vaultJson: json });
-      setEncrypted(box);
+      const replacement = encrypted?.version === 2
+        ? await encryptVault(restored, master, encrypted)
+        : box;
+      if (encrypted) await saveEncryptedVault(encrypted);
+      await saveEncryptedVault(replacement);
+      setEncrypted(replacement);
+      setStartupError("");
+      setVaultCorrupted(false);
       setEntries(restored);
+      setIsNew(false);
+      setUnlocked(true);
       setNotice("Copia local restaurada");
     } catch {
-      setError("No se pudo restaurar: la copia está dañada o usa otra contraseña maestra.");
+      openRecoveryDialog(name);
+      setError("Esta copia no se abrió con la contraseña actual. Si guardaste su clave de recuperación, introdúcela para restaurar la copia y definir una contraseña nueva.");
     }
   }
 
@@ -547,8 +787,29 @@ export default function Home() {
             : "Abriendo Bóveda Pro…"}
         </h1>
         {startupError && (
-          <p>{startupError} Cierra la aplicación y vuelve a intentarlo.</p>
+          <>
+            <p>{startupError}{!vaultCorrupted && " Cierra la aplicación y vuelve a intentarlo."}</p>
+            {vaultCorrupted && <div className="repair-vault">
+              <label htmlFor="repair-master">Contraseña maestra del respaldo</label>
+              <input id="repair-master" type="password" autoComplete="current-password" value={master} onChange={(event) => setMaster(event.currentTarget.value)} placeholder="12 caracteres o más" />
+              <label className="recovery-link backup-restore-link">Seleccionar respaldo cifrado<input type="file" accept="application/json,.json" onChange={(event) => { const file = event.currentTarget.files?.[0]; void importBackup(file); event.currentTarget.value = ""; }} /></label>
+              {localBackups.length > 0 && <div className="local-repair"><label htmlFor="repair-local-backup">O restaurar una copia automática</label><select id="repair-local-backup" value={localRestoreChoice} onChange={(event) => setLocalRestoreChoice(event.currentTarget.value)}><option value="">Selecciona una copia</option>{localBackups.map((backup) => <option key={backup.name} value={backup.name}>{new Date(backup.updated_at).toLocaleString("es-PE")}</option>)}</select><button type="button" disabled={!localRestoreChoice} onClick={() => void restoreLocalBackup(localRestoreChoice)}>Restaurar con contraseña maestra</button></div>}
+              <button type="button" className="recovery-link" onClick={() => openRecoveryDialog()}>Restaurar con la clave de recuperación</button>
+              {error && <div className="error">{error}</div>}
+            </div>}
+          </>
         )}
+        {vaultCorrupted && credentialDialog === "recover" && <div className="modal-backdrop"><form className="modal" onSubmit={submitCredentialChange}>
+          <button type="button" className="close" onClick={closeCredentialDialog}>×</button>
+          <div className="eyebrow">RECUPERACIÓN</div><h2>Restaurar bóveda</h2>
+          <p>Usa la clave de recuperación con una copia externa o automática. Sin una copia válida no se puede reconstruir un archivo dañado.</p>
+          <label htmlFor="repair-recovery-input">Clave de recuperación</label><input id="repair-recovery-input" type="password" value={recoveryInput} onChange={(event) => setRecoveryInput(event.currentTarget.value)} required />
+          <label htmlFor="repair-recovery-backup">Respaldo externo (opcional si eliges una copia local)</label><input id="repair-recovery-backup" type="file" accept="application/json,.json" onChange={(event) => { setRecoveryBackupFile(event.currentTarget.files?.[0] ?? null); if (event.currentTarget.files?.[0]) setRecoveryBackupName(""); }} />
+          <label htmlFor="repair-recovery-local">Copia automática local</label><select id="repair-recovery-local" value={recoveryBackupName} onChange={(event) => { setRecoveryBackupName(event.currentTarget.value); if (event.currentTarget.value) setRecoveryBackupFile(null); }}><option value="">Selecciona una copia</option>{recoveryLocalBackups.map((backup) => <option key={backup.name} value={backup.name}>{new Date(backup.updated_at).toLocaleString("es-PE")}</option>)}</select>
+          <label htmlFor="repair-new-master">Nueva contraseña maestra</label><input id="repair-new-master" type="password" minLength={12} value={newMasterInput} onChange={(event) => setNewMasterInput(event.currentTarget.value)} required />
+          <label htmlFor="repair-confirm-master">Repite la nueva contraseña</label><input id="repair-confirm-master" type="password" minLength={12} value={confirmNewMasterInput} onChange={(event) => setConfirmNewMasterInput(event.currentTarget.value)} required />
+          {error && <div className="error">{error}</div>}<div className="modal-actions"><button type="button" onClick={closeCredentialDialog}>Cancelar</button><button type="submit" className="primary">Restaurar</button></div>
+        </form></div>}
       </main>
     );
   }
@@ -569,7 +830,7 @@ export default function Home() {
             ESPACIO PERSONAL <span>/</span> BÓVEDA
           </div>
           <div className="header-right">
-            {updateVersion ? (
+    {!IS_DEVELOPMENT && (updateVersion ? (
               <button
                 type="button"
                 className="update-cta"
@@ -580,7 +841,7 @@ export default function Home() {
                   ? "Instalando…"
                   : `Instalar actualización ${updateVersion}`}
               </button>
-            ) : (
+    ) : (
               <button
                 type="button"
                 className="update-check"
@@ -589,7 +850,7 @@ export default function Home() {
               >
                 {checkingUpdate ? "Buscando…" : "Buscar actualizaciones"}
               </button>
-            )}
+    ))}
             <span className="secure">
               <i /> CIFRADO ACTIVO
             </span>
@@ -661,10 +922,22 @@ export default function Home() {
                 {isNew ? "Crear bóveda segura" : "Desbloquear bóveda"}
                 <span>→</span>
               </button>
-              <small>
-                Si pierdes la contraseña maestra, no podremos recuperar tus
-                datos.
-              </small>
+              <label className="recovery-link backup-restore-link">
+                Restaurar respaldo cifrado con su contraseña maestra
+                <input type="file" accept="application/json,.json" onChange={(event) => { const file = event.currentTarget.files?.[0]; void importBackup(file); event.currentTarget.value = ""; }} />
+              </label>
+              {!isNew && <button type="button" className="recovery-link" onClick={() => openRecoveryDialog()}>
+                ¿Olvidaste tu contraseña? Usa la clave de recuperación
+              </button>}
+              {isNew && <button type="button" className="recovery-link" onClick={() => openRecoveryDialog()}>
+                ¿Tienes un respaldo y su clave de recuperación? Restáuralo
+              </button>}
+              {isNew && localBackups.length > 0 && <div className="local-repair"><label htmlFor="unlock-local-backup">Restaurar copia automática local</label><select id="unlock-local-backup" value={localRestoreChoice} onChange={(event) => setLocalRestoreChoice(event.currentTarget.value)}><option value="">Selecciona una copia</option>{localBackups.map((backup) => <option key={backup.name} value={backup.name}>{new Date(backup.updated_at).toLocaleString("es-PE")}</option>)}</select><button type="button" disabled={!localRestoreChoice} onClick={() => void restoreLocalBackup(localRestoreChoice)}>Restaurar con contraseña maestra</button></div>}
+              <small>{isNew
+                ? "Al crear la bóveda recibirás una clave de recuperación. Guárdala fuera de este equipo."
+                : encrypted?.version === 1
+                  ? "Esta bóveda antigua no tiene clave de recuperación. Si la desbloqueas, podrás configurar una."
+                  : "Sin la contraseña maestra o la clave de recuperación, no se pueden recuperar los datos."}</small>
             </form>
           </div>
         ) : (
@@ -715,6 +988,15 @@ export default function Home() {
               </button>
             </div>
             <details className="sync-panel">
+              <summary>Seguridad de la bóveda</summary>
+              <p>Cambia la contraseña maestra mientras la bóveda está desbloqueada o crea una clave de recuperación para restablecerla si la olvidas.</p>
+              <div className="security-actions">
+                <button type="button" className="quiet" onClick={() => { setCredentialDialog("change"); setError(""); }}>Cambiar contraseña maestra</button>
+                <button type="button" className="quiet" disabled={securityBusy} onClick={() => void rotateRecoveryKey()}>{securityBusy ? "Procesando…" : encrypted?.version === 2 ? "Generar nueva clave de recuperación" : "Configurar clave de recuperación"}</button>
+              </div>
+              <small>La clave se muestra una sola vez. Guardarla fuera de la bóveda y de este equipo es tu responsabilidad.</small>
+            </details>
+            <details className="sync-panel">
               <summary>Conectar la extensión del navegador</summary>
               {syncDetails?.available ? <>
                 <p>En la extensión, pega este token una sola vez. La app entrega únicamente la bóveda cifrada en tu equipo; ambos programas deben estar abiertos para sincronizar.</p>
@@ -755,15 +1037,17 @@ export default function Home() {
             </div>
             <details className="sync-panel local-backups">
               <summary>Copias cifradas automáticas ({localBackups.length})</summary>
-              <p>Se guarda una copia cifrada con cada cambio y se conservan las 20 más recientes en este equipo.</p>
+              <p>Se guarda una copia cifrada con cada cambio y se conservan las 20 más recientes. Por defecto quedan en este equipo; para cubrir pérdida o avería del PC, elige una carpeta sincronizada de OneDrive, Google Drive o Dropbox. La app creará dentro la carpeta «Boveda Pro Backups».</p>
               <div className="backup-location"><small>Carpeta: {backupDirectory || "Cargando…"}</small><button type="button" className="quiet" onClick={chooseBackupDirectory}>Elegir carpeta</button><button type="button" className="quiet" onClick={resetBackupDirectory}>Restablecer</button></div>
               {localBackups.slice(0, 8).map((backup) => <div className="backup-row" key={backup.name}><span>{new Date(backup.updated_at).toLocaleString("es-PE")}</span><button type="button" className="quiet" onClick={() => restoreLocalBackup(backup.name)}>Restaurar</button></div>)}
             </details>
-            {(weakCount > 0 || duplicateCount > 0 || oldPasswords.length > 0 || (backupDue && encrypted !== null)) && (
+            {(weakCount > 0 || duplicateCount > 0 || oldPasswords.length > 0 || (backupDue && encrypted !== null) || Boolean(backupWarning)) && (
               <div className="security-alerts" role="status">
                 {weakCount > 0 && <span>⚠ {weakCount} contraseña(s) débil(es)</span>}
                 {duplicateCount > 0 && <span>⚠ {duplicateCount} contraseña(s) reutilizada(s)</span>}
                 {oldPasswords.length > 0 && <span>⟳ {oldPasswords.length} contraseña(s) con más de un año</span>}
+                {backupWarning && <span>⚠ La bóveda se guardó, pero falló la copia automática: {backupWarning}</span>}
+                {backupWarning && <button type="button" onClick={chooseBackupDirectory}>Elegir carpeta sincronizada</button>}
                 {backupDue && encrypted && <span>▣ Es hora de exportar una copia cifrada{lastBackup ? ` · última exportación ${new Date(lastBackup).toLocaleDateString("es-PE")}` : " · aún no has exportado una copia externa"}</span>}
                 {backupDue && encrypted && <button type="button" onClick={exportBackup}>Crear respaldo</button>}
                 {backupDue && encrypted && <button type="button" onClick={dismissBackupReminder}>Recordar en 7 días</button>}
@@ -894,6 +1178,66 @@ export default function Home() {
           </div>
         )}
       </section>
+      {recoveryToShow && (
+        <div className="modal-backdrop">
+          <section className="modal" role="dialog" aria-modal="true" aria-labelledby="recovery-title">
+            <div className="eyebrow">CLAVE DE RECUPERACIÓN</div>
+            <h2 id="recovery-title">Guárdala ahora</h2>
+            <p>Esta clave permite restablecer la contraseña maestra. Bóveda Pro no puede volver a mostrarla después de cerrar esta ventana. El archivo se guarda en texto claro: guárdalo en un lugar seguro y separado de los respaldos cifrados.</p>
+            <code className="recovery-code">{recoveryToShow}</code>
+            <div className="modal-actions recovery-actions">
+              <button type="button" className="quiet" onClick={() => void copyRecoveryKey()}>Copiar clave</button>
+              <button type="button" className="quiet" disabled={savingRecoveryKey} onClick={() => void saveRecoveryKeyFile()}>{savingRecoveryKey ? "Guardando…" : "Guardar archivo…"}</button>
+            </div>
+            {error && <div className="error">{error}</div>}
+            <label className="checkbox-label recovery-confirm">
+              <input type="checkbox" checked={recoveryAcknowledged} onChange={(event) => setRecoveryAcknowledged(event.currentTarget.checked)} />
+              La guardé en un lugar seguro y podré encontrarla si la necesito.
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="primary" disabled={!recoveryAcknowledged} onClick={() => { setRecoveryToShow(null); setRecoveryAcknowledged(false); setNotice("Clave de recuperación guardada"); }}>Continuar</button>
+            </div>
+          </section>
+        </div>
+      )}
+      {credentialDialog && (
+        <div className="modal-backdrop">
+          <form className="modal" onSubmit={submitCredentialChange}>
+            <button type="button" className="close" aria-label="Cerrar" disabled={securityBusy} onClick={closeCredentialDialog}>×</button>
+            <div className="eyebrow">SEGURIDAD DE LA BÓVEDA</div>
+            <h2>{credentialDialog === "recover" ? "Restablecer contraseña" : "Cambiar contraseña maestra"}</h2>
+            <p>{credentialDialog === "recover" ? "Introduce la clave de recuperación. Puedes usar la bóveda de este equipo, una copia automática local o un respaldo cifrado." : "Confirma tu contraseña actual para cifrar de nuevo la clave de la bóveda."}</p>
+            {credentialDialog === "recover" ? (
+              <>
+                <label htmlFor="recovery-input">Clave de recuperación</label>
+                <input id="recovery-input" type="password" autoComplete="off" value={recoveryInput} onChange={(event) => setRecoveryInput(event.currentTarget.value)} required />
+                <label htmlFor="recovery-local-backup">Copia automática de este equipo <small>(opcional)</small></label>
+                <select id="recovery-local-backup" value={recoveryBackupName} onChange={(event) => { setRecoveryBackupName(event.currentTarget.value); if (event.currentTarget.value) setRecoveryBackupFile(null); }}>
+                  <option value="">Usar la bóveda actual</option>
+                  {recoveryLocalBackups.map((backup) => <option key={backup.name} value={backup.name}>{new Date(backup.updated_at).toLocaleString("es-PE")}</option>)}
+                </select>
+                <label htmlFor="recovery-backup">O seleccionar un respaldo externo <small>(opcional)</small></label>
+                <input id="recovery-backup" type="file" accept="application/json,.json" onChange={(event) => { setRecoveryBackupFile(event.currentTarget.files?.[0] ?? null); if (event.currentTarget.files?.[0]) setRecoveryBackupName(""); }} />
+                <small className="recovery-limit">Si perdiste también la clave de recuperación, no existe una clave maestra de respaldo. Solo podrás abrir una copia si aún recuerdas la contraseña con la que se cifró.</small>
+              </>
+            ) : (
+              <>
+                <label htmlFor="current-master-input">Contraseña maestra actual</label>
+                <input id="current-master-input" type="password" autoComplete="current-password" value={currentMasterInput} onChange={(event) => setCurrentMasterInput(event.currentTarget.value)} required />
+              </>
+            )}
+            <label htmlFor="new-master-input">Nueva contraseña maestra</label>
+            <input id="new-master-input" type="password" autoComplete="new-password" minLength={12} value={newMasterInput} onChange={(event) => setNewMasterInput(event.currentTarget.value)} required />
+            <label htmlFor="confirm-new-master-input">Repite la nueva contraseña</label>
+            <input id="confirm-new-master-input" type="password" autoComplete="new-password" minLength={12} value={confirmNewMasterInput} onChange={(event) => setConfirmNewMasterInput(event.currentTarget.value)} required />
+            {error && <div className="error">{error}</div>}
+            <div className="modal-actions">
+              <button type="button" disabled={securityBusy} onClick={closeCredentialDialog}>Cancelar</button>
+              <button type="submit" className="primary" disabled={securityBusy}>{securityBusy ? "Procesando…" : credentialDialog === "recover" ? "Restablecer contraseña" : "Guardar contraseña nueva"}</button>
+            </div>
+          </form>
+        </div>
+      )}
       {dialog && (
         <div className="modal-backdrop">
           <form className="modal" onSubmit={saveEntry}>
